@@ -8,7 +8,6 @@ app = FastAPI(title="ihatepdfs Backend - Free PDF to Word")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
-    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -16,7 +15,7 @@ app.add_middleware(
 @app.post("/convert")
 async def convert_pdf_to_word(file: UploadFile):
     if not file.filename.lower().endswith(".pdf"):
-        raise HTTPException(status_code=400, detail="Only PDF files are supported")
+        raise HTTPException(status_code=400, detail="Only PDF files allowed.")
 
     file_id = str(uuid.uuid4())
     input_path = f"/tmp/{file_id}.pdf"
@@ -34,21 +33,23 @@ async def convert_pdf_to_word(file: UploadFile):
     ]
 
     try:
-        subprocess.run(cmd, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-    except subprocess.CalledProcessError as e:
-        stderr = e.stderr.decode() if hasattr(e, "stderr") else str(e)
-        raise HTTPException(status_code=500, detail=f"Conversion failed: {stderr}")
+        run = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        print("LibreOffice STDOUT:", run.stdout)
+        print("LibreOffice STDERR:", run.stderr)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Conversion command failed: {e}")
 
-    base = os.path.splitext(os.path.basename(input_path))[0]
-    files = glob.glob(os.path.join(output_dir, f"{base}*.docx"))
+    # Match ANY docx output
+    docx_files = glob.glob(f"/tmp/{file_id}*.docx")
 
-    if not files:
-        raise HTTPException(status_code=500, detail="Converted file not found")
+    if not docx_files:
+        raise HTTPException(status_code=500, detail=f"Converted file not found. LO stderr: {run.stderr}")
 
-    output_path = files[0]
+    output_path = docx_files[0]
 
     return FileResponse(
         output_path,
         media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         filename="converted.docx"
     )
+
