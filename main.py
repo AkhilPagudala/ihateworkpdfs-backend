@@ -28,18 +28,14 @@ async def convert_pdf_to_word(file: UploadFile):
     os.makedirs("/root/.config/libreoffice", exist_ok=True)
 
     cmd = [
-        "libreoffice",
-        "--headless",
-        "--invisible",
-        "--nologo",
-        "--nodefault",
-        "--norestore",
-        "--nofirststartwizard",
-        f"-env:UserInstallation=file:///tmp/LibreOfficeProfile",
-        "--convert-to", 'docx:"MS Word 2007 XML"',
-        input_path,
-        "--outdir", output_dir
-    ]
+    "libreoffice",
+    "--headless",
+    "--convert-to",
+    "docx:MS Word 2007 XML",
+    input_path,
+    "--outdir",
+    output_dir
+]
 
     run = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
 
