@@ -1,4 +1,7 @@
-import subprocess, uuid, os, glob
+import subprocess
+import uuid
+import os
+import glob
 from fastapi import FastAPI, UploadFile, HTTPException
 from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
@@ -14,39 +17,81 @@ app.add_middleware(
 
 @app.post("/convert")
 async def convert_pdf_to_word(file: UploadFile):
+
     if not file.filename.lower().endswith(".pdf"):
-        raise HTTPException(status_code=400, detail="Only PDF files allowed.")
+        raise HTTPException(status_code=400, detail="Only PDF files are allowed.")
 
     file_id = str(uuid.uuid4())
-    input_path = f"/tmp/{file_id}.pdf"
+    original_pdf = f"/tmp/{file_id}.pdf"
+    repaired_pdf = f"/tmp/{file_id}_repaired.pdf"
     output_dir = "/tmp"
 
-    with open(input_path, "wb") as f:
+    # -----------------------------
+    # 1. Save uploaded PDF
+    # -----------------------------
+    with open(original_pdf, "wb") as f:
         f.write(await file.read())
 
-    # Create LibreOffice profile directory
-    os.makedirs("/root/.config/libreoffice", exist_ok=True)
+    # -----------------------------
+    # 2. Repair PDF using Ghostscript
+    # -----------------------------
+    try:
+        repair_cmd = [
+            "gs",
+            "-sDEVICE=pdfwrite",
+            "-dCompatibilityLevel=1.4",
+            "-dPDFSETTINGS=/default",
+            "-dNOPAUSE",
+            "-dQUIET",
+            "-dBATCH",
+            f"-sOutputFile={repaired_pdf}",
+            original_pdf
+        ]
+        subprocess.run(repair_cmd, check=True)
+        input_pdf = repaired_pdf
+    except Exception as e:
+        input_pdf = original_pdf  # fallback to original if repair fails
 
-    cmd = [
-    "libreoffice",
-    "--headless",
-    "--convert-to",
-    "docx:MS Word 2007 XML",
-    input_path,
-    "--outdir",
-    output_dir
-]
+    # -----------------------------
+    # 3. Convert to DOCX using LibreOffice
+    # -----------------------------
+    convert_cmd = [
+        "libreoffice",
+        "--headless",
+        "--invisible",
+        "--convert-to",
+        "docx:MS Word 2007 XML",
+        input_pdf,
+        "--outdir",
+        output_dir
+    ]
 
-    run = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    run = subprocess.run(convert_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
 
+    if run.returncode != 0:
+        raise HTTPException(
+            status_code=500,
+            detail=f"LibreOffice conversion failed. STDERR: {run.stderr}"
+        )
+
+    # -----------------------------
+    # 4. Locate output DOCX file
+    # -----------------------------
     docx_files = glob.glob(f"/tmp/{file_id}*.docx")
 
     if not docx_files:
         raise HTTPException(
             status_code=500,
-            detail=f"Conversion failed. LibreOffice error: {run.stderr}"
+            detail="Conversion failed: DOCX file was not generated."
         )
 
-    return FileResponse(docx_files[0], filename="converted.docx")
+    output_path = docx_files[0]
 
-
+    # -----------------------------
+    # 5. Return file for download
+    # -----------------------------
+    return FileResponse(
+        output_path,
+        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        filename="converted.docx"
+    )
