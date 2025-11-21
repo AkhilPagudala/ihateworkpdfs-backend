@@ -1,12 +1,14 @@
-import subprocess
 import uuid
 import os
-import glob
 from fastapi import FastAPI, UploadFile, HTTPException
 from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 
-app = FastAPI(title="ihateworkpdfs Backend - Robust PDF to Word")
+import pdfplumber
+from docx import Document
+from docx.shared import Pt
+
+app = FastAPI(title="ihateworkpdfs Backend - High Quality PDF to Word")
 
 app.add_middleware(
     CORSMiddleware,
@@ -15,6 +17,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
 @app.post("/convert")
 async def convert_pdf_to_word(file: UploadFile):
 
@@ -22,70 +25,45 @@ async def convert_pdf_to_word(file: UploadFile):
         raise HTTPException(status_code=400, detail="Only PDF files are allowed.")
 
     file_id = str(uuid.uuid4())
-    original_pdf = f"/tmp/{file_id}.pdf"
-    repaired_pdf = f"/tmp/{file_id}_repaired.pdf"
-    output_dir = "/tmp"
+    input_pdf = f"/tmp/{file_id}.pdf"
 
-    # 1. Save PDF
-    with open(original_pdf, "wb") as f:
+    original_name = os.path.splitext(file.filename)[0]
+    output_docx = f"/tmp/{original_name}.docx"
+
+    # Save uploaded file
+    with open(input_pdf, "wb") as f:
         f.write(await file.read())
 
-    # 2. Repair PDF using Ghostscript
+    # Create Word document
+    doc = Document()
+    style = doc.styles['Normal']
+    style.font.name = 'Calibri'
+    style.font.size = Pt(11)
+
     try:
-        repair_cmd = [
-            "gs",
-            "-sDEVICE=pdfwrite",
-            "-dCompatibilityLevel=1.4",
-            "-dPDFSETTINGS=/prepress",
-            "-dNOPAUSE",
-            "-dQUIET",
-            "-dBATCH",
-            f"-sOutputFile={repaired_pdf}",
-            original_pdf
-        ]
-        subprocess.run(repair_cmd, check=True)
-        input_pdf = repaired_pdf
-    except Exception:
-        input_pdf = original_pdf
+        with pdfplumber.open(input_pdf) as pdf:
+            for page in pdf.pages:
+                lines = page.extract_text()
 
-    # 3. Force LibreOffice PDF Import Engine
-    convert_cmd = [
-        "libreoffice",
-        "--headless",
-        "--infilter=writer_pdf_import",
-        "--convert-to", "docx:MS Word 2007 XML",
-        input_pdf,
-        "--outdir", output_dir
-    ]
+                if lines:
+                    for line in lines.split("\n"):
+                        doc.add_paragraph(line)
+                else:
+                    doc.add_paragraph(" ")
 
-    process = subprocess.run(
-        convert_cmd,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True
-    )
+        doc.save(output_docx)
 
-    if process.returncode != 0:
+    except Exception as e:
         raise HTTPException(
             status_code=500,
-            detail=f"LibreOffice command failed.\nSTDERR:\n{process.stderr}"
+            detail=f"PDFPlumber conversion failed: {str(e)}"
         )
 
-    # 4. Find DOCX Output
-    pattern = f"/tmp/{file_id}*.docx"
-    docx_files = glob.glob(pattern)
+    if not os.path.exists(output_docx):
+        raise HTTPException(status_code=500, detail="DOCX file not generated.")
 
-    if not docx_files:
-        raise HTTPException(
-            status_code=500,
-            detail=f"No DOCX created. LibreOffice output:\n{process.stderr}"
-        )
-
-    output_path = docx_files[0]
-
-    # 5. Return DOCX
     return FileResponse(
-        output_path,
+        output_docx,
         media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-        filename="converted.docx"
+        filename=f"{original_name}.docx"
     )
