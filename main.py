@@ -3,7 +3,7 @@ from fastapi import FastAPI, UploadFile, HTTPException
 from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 
-app = FastAPI(title="ihatepdfs Backend - Free PDF to Word")
+app = FastAPI(title="ihateworkpdfs Backend - Free PDF to Word")
 
 app.add_middleware(
     CORSMiddleware,
@@ -24,38 +24,33 @@ async def convert_pdf_to_word(file: UploadFile):
     with open(input_path, "wb") as f:
         f.write(await file.read())
 
+    # Create LibreOffice profile directory
+    os.makedirs("/root/.config/libreoffice", exist_ok=True)
+
     cmd = [
-    "libreoffice",
-    "--headless",
-    "--invisible",
-    "--nologo",
-    "--nolockcheck",
-    "--nodefault",
-    "--nofirststartwizard",
-    "--convert-to", 'docx:"MS Word 2007 XML"',
-    input_path,
-    "--outdir", output_dir
-]
+        "libreoffice",
+        "--headless",
+        "--invisible",
+        "--nologo",
+        "--nodefault",
+        "--norestore",
+        "--nofirststartwizard",
+        f"-env:UserInstallation=file:///tmp/LibreOfficeProfile",
+        "--convert-to", 'docx:"MS Word 2007 XML"',
+        input_path,
+        "--outdir", output_dir
+    ]
 
+    run = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
 
-    try:
-        run = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-        print("LibreOffice STDOUT:", run.stdout)
-        print("LibreOffice STDERR:", run.stderr)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Conversion command failed: {e}")
-
-    # Match ANY docx output
     docx_files = glob.glob(f"/tmp/{file_id}*.docx")
 
     if not docx_files:
-        raise HTTPException(status_code=500, detail=f"Converted file not found. LO stderr: {run.stderr}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Conversion failed. LibreOffice error: {run.stderr}"
+        )
 
-    output_path = docx_files[0]
+    return FileResponse(docx_files[0], filename="converted.docx")
 
-    return FileResponse(
-        output_path,
-        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-        filename="converted.docx"
-    )
 
