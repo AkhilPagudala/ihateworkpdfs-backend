@@ -25,12 +25,18 @@ async def convert_pdf_to_word(file: UploadFile):
         f.write(await file.read())
 
     cmd = [
-        "libreoffice",
-        "--headless",
-        "--convert-to", "docx",
-        input_path,
-        "--outdir", output_dir
-    ]
+    "libreoffice",
+    "--headless",
+    "--invisible",
+    "--nologo",
+    "--nolockcheck",
+    "--nodefault",
+    "--nofirststartwizard",
+    "--convert-to", 'docx:"MS Word 2007 XML"',
+    input_path,
+    "--outdir", output_dir
+]
+
 
     try:
         run = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
